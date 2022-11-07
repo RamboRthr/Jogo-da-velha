@@ -1,11 +1,11 @@
 package com.teste.teste.services;
-import com.teste.teste.Board;
-import com.teste.teste.Play;
-import com.teste.teste.Rules;
+import com.teste.teste.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import javax.xml.crypto.Data;
+import java.sql.SQLException;
 
 @RestController
 @RequestMapping("/service")
@@ -13,6 +13,9 @@ public class Service {
 
     Board board;
     Rules rules;
+    Result result;
+
+    public static DataAcces dataAcces = new DataAcces();
 
     @GetMapping
     public ResponseEntity<String> iniciar(String msg){
@@ -21,47 +24,70 @@ public class Service {
 
         board = new Board();
         rules = new Rules();
+        dataAcces.init();
 
         return new ResponseEntity(res, HttpStatus.OK); //Startet den Spiel
     }
 
     @PostMapping
-    public ResponseEntity<String> post(@RequestBody int posicao){
+    public ResponseEntity<String> post(@RequestBody Play obj){
 
-        var play = new Play(rules.jogada, rules.marca, posicao);
+        var play = new Play(rules.jogada, rules.marca, obj.getPosicao());
 
-        if (verifyIfIsOver(board.board)){
-            String str = rules.vencedor + "venceu!\nPara jogar novamente, altere para GET.";
-            if (rules.marca.equalsIgnoreCase("X")){
-                rules.vencedor = "X";
-                return new ResponseEntity(str, HttpStatus.OK);
-            }
-            else {
-                rules.vencedor = "O";
-                return new ResponseEntity(str, HttpStatus.OK);
-            }
 
+        int linha = setPos(obj.getPosicao())[0];
+        int coluna = setPos(obj.getPosicao())[1];
+        if (!validPosition(board, linha, coluna)){ //Verifiziert ob die gegebene Position nicht außerhalb des Bereichs oder nicht belegt ist.
+            return new ResponseEntity<>("Posição inválida, tente novamente.", HttpStatus.OK);
         }
         else {
 
+            board.board[linha][coluna] = rules.marca; //Füllt den Board in der gegebenen Position
+            try {
+                dataAcces.insertZug(new Play(rules.jogada, rules.marca, obj.getPosicao()));
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
 
-            int linha = setPos(posicao)[0];
-            int coluna = setPos(posicao)[1];
-            if (!validPosition(board, linha, coluna)){ //Verifiziert ob die gegebene Position nicht außerhalb des Bereichs oder nicht belegt ist.
-                return new ResponseEntity<>("Posição inválida, tente novamente.", HttpStatus.OK);
+            rules.jogada++;
+
+            if (rules.jogada == 9){//Verifiziert ob es kein Unentschieden gibt
+
+                try {
+                    dataAcces.insertResultat(new Result(null, rules.jogada, true));
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
+                }
+                return new ResponseEntity("Empate! Fim de jogo.", HttpStatus.OK);
+
+            } else if (verifyIfIsOver(board.board)) {
+                try {
+                    dataAcces.deleteZuege();
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
+                }
+                rules.vencedor = rules.marca;
+                String str = rules.vencedor + " venceu!\nPara jogar novamente, altere para GET.";
+                if (rules.marca.equalsIgnoreCase("X")){
+                    rules.vencedor = "X";
+                    try {
+                        dataAcces.insertResultat(new Result(rules.vencedor, rules.jogada, false));
+                    } catch (SQLException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return new ResponseEntity(str, HttpStatus.OK);
+                }
+                else {
+                    rules.vencedor = "O";
+                    try {
+                        dataAcces.insertResultat(new Result(rules.vencedor, rules.jogada, false));
+                    } catch (SQLException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return new ResponseEntity(str, HttpStatus.OK);
+                }
             }
             else {
-
-                board.board[linha][coluna] = rules.marca; //Füllt den Board in der gegebenen Position
-
-
-                rules.jogada++;
-
-                if (rules.jogada == 9){
-                    return new ResponseEntity("Empate! Fim de jogo.", HttpStatus.OK); //Verifiziert ob es kein Unentschieden gibt
-                } else if (verifyIfIsOver(board.board)) {
-
-                }
 
                 if (rules.marca.equalsIgnoreCase("X")) {
                     rules.marca = "O";
@@ -69,8 +95,7 @@ public class Service {
                     rules.marca = "X";
                 }
 
-
-                return new ResponseEntity(boardToString() + "\n" + rules.marca + " Escolheu a posição " + posicao
+                return new ResponseEntity(boardToString() + "\n" + rules.marca + " Escolheu a posição " + obj.getPosicao()
                         + "\nVez de " + rules.marca, HttpStatus.OK);
             }
         }
@@ -80,7 +105,6 @@ public class Service {
     public ResponseEntity<String> boardOverview(String msg){
         return new ResponseEntity(boardToString(), HttpStatus.OK);
     }
-
     private static int[] setPos (int pos){ //bekommt die Nummer der Position und gibt ihre Zeile und Spalte zurück.
         int linha;
         int coluna;
@@ -177,5 +201,4 @@ public class Service {
             return true;
         }
     }
-
 }
